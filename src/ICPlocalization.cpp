@@ -30,6 +30,8 @@
 #include <rclcpp/utilities.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <thread>
+#include <ament_index_cpp/get_package_share_directory.hpp>
+#include <filesystem>
 
 namespace icp_loco {
 
@@ -38,7 +40,15 @@ const double kRadToDeg = 180.0 / M_PI;
 }
 
 ICPlocalization::ICPlocalization(const rclcpp::NodeOptions &options)
-    : Node("icp_localization", options) {}
+    : Node("icp_localization", options) {
+  std::vector<double> leafSize =
+      this->declare_parameter("leaf_size", std::vector<double>{0.1, 0.1, 0.1});
+  if (leafSize.size() != 3) {
+    RCLCPP_ERROR(this->get_logger(), "Leaf size must have 3 elements");
+    leafSize = {0.1, 0.1, 0.1};
+  }
+  mapCloudFilter_.setLeafSize(leafSize[0], leafSize[1], leafSize[2]);
+}
 
 ICPlocalization::~ICPlocalization() {
   icpWorker_.join();
@@ -47,12 +57,15 @@ ICPlocalization::~ICPlocalization() {
   std::cout << lastPose.asString() << "\n";
 }
 
-void ICPlocalization::setMapCloud(const Pointcloud &map) {
-  mapCloud_ = map;
-  refCloud_ = fromPCL(map);
+void ICPlocalization::setMapCloud(const Pointcloud::Ptr map) {
+  mapCloudFilter_.setInputCloud(map);
+  mapCloudFilter_.filter(mapCloud_);
+  refCloud_ = fromPCL(mapCloud_);
+
   isMapSet_ = true;
   icp_.setMap(refCloud_);
-  std::cout << "Map size is: " << mapCloud_.points.size() << std::endl;
+  std::cout << "Map size is: " << map->points.size() << "(befor filter), "
+            << mapCloud_.points.size() << "(after filter)" << std::endl;
 }
 
 void ICPlocalization::setInitialPose(const Eigen::Vector3d &p,
@@ -119,10 +132,9 @@ void ICPlocalization::initializeInternal() {
 
 void ICPlocalization::initialize() {
 
-
   const std::string configFileIcp =
       this->declare_parameter("icp_config_path", "");
-      // std::cout<<"configFileIcp: "<<configFileIcp<<std::endl;
+  // std::cout<<"configFileIcp: "<<configFileIcp<<std::endl;
   try {
     std::ifstream in(configFileIcp);
     if (!in.is_open()) {
@@ -137,7 +149,10 @@ void ICPlocalization::initialize() {
   const std::string configFileFilters =
       this->declare_parameter("input_filters_config_path", "");
   try {
-    std::ifstream in(configFileFilters);
+    namespace fs = std::filesystem;
+    fs::path pkgPath = ament_index_cpp::get_package_share_directory("icp_localization_ros2");
+    fs::path fullPath = pkgPath / configFileFilters;
+    std::ifstream in(fullPath.string());
     if (!in.is_open()) {
       throw std::runtime_error("config file filters opening failed");
     }
@@ -149,7 +164,7 @@ void ICPlocalization::initialize() {
 
   std::string rangeDataTopic =
       this->declare_parameter("icp_localization_ros2.range_data_topic", "");
-  
+
   if (rangeDataTopic.empty()) {
     RCLCPP_ERROR_STREAM(this->get_logger(), "failed to load range data topic");
   }
@@ -168,17 +183,16 @@ void ICPlocalization::initialize() {
   std::cout << "odometry data topic: " << odometryDataTopic << std::endl;
   std::cout << "imu data topic: " << imuDataTopic << std::endl;
 
-  isUseOdometry_ = this->declare_parameter(
-      "icp_localization_ros2.is_use_odometry", false);
+  isUseOdometry_ =
+      this->declare_parameter("icp_localization_ros2.is_use_odometry", false);
   std::cout << "Is use odometry: " << std::boolalpha << isUseOdometry_ << "\n";
 
   tfPublisher_->setOdometryTopic(odometryDataTopic);
   tfPublisher_->setImuTopic(imuDataTopic);
   tfPublisher_->setIsProvideOdomFrame(isUseOdometry_);
 
-  const double gravityVectorFilterTimeConstant =
-      this->declare_parameter(
-          "icp_localization_ros2.gravity_vector_filter_time_constant", 0.01);
+  const double gravityVectorFilterTimeConstant = this->declare_parameter(
+      "icp_localization_ros2.gravity_vector_filter_time_constant", 0.01);
   std::cout << "Gravity vector filter time constant: "
             << gravityVectorFilterTimeConstant << "\n";
   imuTracker_->setGravityVectorFilterTimeConstant(
@@ -217,16 +231,16 @@ void ICPlocalization::initialize() {
   RangeDataAccumulatorParamRos rangeDataAccParam;
   rangeDataAccParam.numAccumulatedRangeData_ = this->declare_parameter(
       "icp_localization_ros2.num_accumulated_range_data", 1);
-  rangeDataAccParam.inputRangeDataTopic_ = this->get_parameter(
-      "icp_localization_ros2.range_data_topic").as_string();
+  rangeDataAccParam.inputRangeDataTopic_ =
+      this->get_parameter("icp_localization_ros2.range_data_topic").as_string();
 
   std::cout << "range data parameters: \n";
   std::cout << "topic: " << rangeDataAccParam.inputRangeDataTopic_ << "\n";
   std::cout << "num range data accumulated: "
             << rangeDataAccParam.numAccumulatedRangeData_ << "\n \n";
 
-  fixedFrame_ = this->declare_parameter(
-      "icp_localization_ros2.fixed_frame", "map");
+  fixedFrame_ =
+      this->declare_parameter("icp_localization_ros2.fixed_frame", "map");
   std::cout << "Setting fixed frame to: " << fixedFrame_ << std::endl;
 
   rangeDataAccumulator_->setParam(rangeDataAccParam);
@@ -324,11 +338,11 @@ void ICPlocalization::publishPose() const {
   pose_msg.pose.position.x = optimizedPose_(0, 3);
   pose_msg.pose.position.y = optimizedPose_(1, 3);
   pose_msg.pose.position.z = optimizedPose_(2, 3);
-	Eigen::Isometry3f iso;
-	iso.matrix() = optimizedPose_;
-	Eigen::Quaternionf q;
-	q = iso.rotation();
-	
+  Eigen::Isometry3f iso;
+  iso.matrix() = optimizedPose_;
+  Eigen::Quaternionf q;
+  q = iso.rotation();
+
   q.normalize();
   pose_msg.pose.orientation.w = q.w();
   pose_msg.pose.orientation.x = q.x();

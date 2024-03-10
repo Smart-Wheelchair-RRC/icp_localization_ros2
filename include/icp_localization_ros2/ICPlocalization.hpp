@@ -18,6 +18,8 @@
 #include "icp_localization_ros2/helpers.hpp"
 #include "pointmatcher/IO.h"
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <pcl/filters/voxel_grid.h>
+
 // #include <eigen_conversions/eigen_msg.h>
 #include <boost/algorithm/string/erase.hpp>
 #include <boost/algorithm/string/predicate.hpp>
@@ -37,7 +39,7 @@ public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   ICPlocalization(const rclcpp::NodeOptions &options);
   ~ICPlocalization();
-  void setMapCloud(const Pointcloud &map);
+  void setMapCloud(const Pointcloud::Ptr map);
   void setInitialPose(const Eigen::Vector3d &p, const Eigen::Quaterniond &q);
   void initialize();
   DP fromPCL(const Pointcloud &pcl);
@@ -65,9 +67,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr posePub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
       initialPose_;
-  // ros::Publisher registeredCloudPublisher_;
-  // ros::Publisher posePub_;
-  // ros::Subscriber initialPose_;
+  pcl::VoxelGrid<pcl::PointXYZ> mapCloudFilter_;
   PM::ICPSequence icp_;
   PM::DataPointsFilters inputFilters_;
   DP refCloud_;

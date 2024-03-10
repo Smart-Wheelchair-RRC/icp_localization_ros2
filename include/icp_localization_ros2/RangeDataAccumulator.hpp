@@ -68,9 +68,6 @@ private:
   std::shared_ptr<rclcpp::Node> nh_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloudSubscriber_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr accumulatedRangeDataPub_;
-  //  ros::NodeHandle nh_;
-  //  ros::Subscriber cloudSubscriber_;
-  //  ros::Publisher accumulatedRangeDataPub_;
   RangeDataAccumulatorParamRos param_;
   std::thread publisherWorker_;
   std::string frameId_ = "map";

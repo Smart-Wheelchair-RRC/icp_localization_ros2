@@ -61,13 +61,14 @@ void TfPublisher::initialize() {
   imuSubscriber_ = nh_->create_subscription<sensor_msgs::msg::Imu>(
       imuTopic_, rclcpp::QoS(rclcpp::KeepLast(1)),
       std::bind(&TfPublisher::imuCallback, this, std::placeholders::_1));
-      tfBroadcaster_= std::make_shared<tf2_ros::TransformBroadcaster>(nh_);
+  tfBroadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(nh_);
 }
 
 void TfPublisher::publishMapToRangeSensor(const Time &t) {
   const auto mapToLidar = frameTracker_->getTransformMapToRangeSensor(t);
   geometry_msgs::msg::TransformStamped transformStamped =
       toRos(mapToLidar, t, "map", "range_sensor");
+  transformStamped.header.stamp = nh_->now();
   tfBroadcaster_->sendTransform(transformStamped);
 }
 
@@ -87,22 +88,26 @@ void TfPublisher::publishMapToOdom(const Time &t) {
   const auto mapToOdom = frameTracker_->getTransformMapToOdom(t);
   geometry_msgs::msg::TransformStamped transformStamped =
       toRos(mapToOdom, t, "map", "odom");
+  transformStamped.header.stamp = nh_->now();
   tfBroadcaster_->sendTransform(transformStamped);
   // just for debug
 
   if (isDebug) {
     const auto mapToLidar = frameTracker_->getTransformMapToRangeSensor(t);
     transformStamped = toRos(mapToLidar, t, "map", "rs_check");
+    transformStamped.header.stamp = nh_->now();
     tfBroadcaster_->sendTransform(transformStamped);
 
     const auto lidarToCam =
         (frameTracker_->getTransformOdomSourceToRangeSensor(t)).inverse();
     geometry_msgs::msg::TransformStamped transformStamped =
         toRos(lidarToCam, t, "rs_check", "os_check");
+    transformStamped.header.stamp = nh_->now();
     tfBroadcaster_->sendTransform(transformStamped);
 
     const auto check = mapToLidar * lidarToCam;
     transformStamped = toRos(check, t, "map", "rs_os_check");
+    transformStamped.header.stamp = nh_->now();
     tfBroadcaster_->sendTransform(transformStamped);
   }
 }
@@ -121,6 +126,7 @@ void TfPublisher::odometryCallback(const nav_msgs::msg::Odometry &msg) {
   if (isProvideOdomFrame_) {
     geometry_msgs ::msg::TransformStamped transformStamped = toRos(
         odomToTracking.transform_, odomToTracking.time_, "odom", "odom_source");
+    transformStamped.header.stamp = nh_->now();
     tfBroadcaster_->sendTransform(transformStamped);
 
     const auto cameraToLidar =
@@ -128,6 +134,7 @@ void TfPublisher::odometryCallback(const nav_msgs::msg::Odometry &msg) {
             odomToTracking.time_);
     transformStamped = toRos(cameraToLidar, odomToTracking.time_, "odom_source",
                              "range_sensor");
+    transformStamped.header.stamp = nh_->now();
     tfBroadcaster_->sendTransform(transformStamped);
 
     // just visualize raw odometry
@@ -137,9 +144,11 @@ void TfPublisher::odometryCallback(const nav_msgs::msg::Odometry &msg) {
             .inverse();
     transformStamped = toRos(initPose * lidarToOdomSource, odomToTracking.time_,
                              "map", "init_odom_source");
+    transformStamped.header.stamp = nh_->now();
     tfBroadcaster_->sendTransform(transformStamped);
     transformStamped = toRos(odomToTracking.transform_, odomToTracking.time_,
                              "init_odom_source", "raw_odometry_source");
+    transformStamped.header.stamp = nh_->now();
     tfBroadcaster_->sendTransform(transformStamped);
   }
 }
@@ -153,6 +162,7 @@ void TfPublisher::imuCallback(const sensor_msgs::msg::Imu &msg) {
       frameTracker_->getTransformImuToRangeSensor(imuReading.time_).inverse();
   geometry_msgs::msg::TransformStamped transformStamped =
       toRos(lidarToImu, imuReading.time_, "range_sensor", "inertial_sensor");
+  transformStamped.header.stamp = nh_->now();
   tfBroadcaster_->sendTransform(transformStamped);
 
   //	{
