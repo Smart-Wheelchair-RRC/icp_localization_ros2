@@ -37,6 +37,14 @@ namespace icp_loco {
 
 namespace {
 const double kRadToDeg = 180.0 / M_PI;
+
+// Simple validity check for PointMatcher DataPoints: features and descriptors must
+// have the same number of columns (points). Non-dense or corrupted scans can violate this.
+inline bool hasMatchingPointCounts(const DP& cloud) {
+  const auto nFeat = cloud.features.cols();
+  const auto nDesc = cloud.descriptors.cols();
+  return nFeat == nDesc && nFeat > 0;
+}
 }
 
 ICPlocalization::ICPlocalization(const rclcpp::NodeOptions &options)
@@ -126,8 +134,6 @@ void ICPlocalization::initializeInternal() {
   // Initialite tf listener
   tfBuffer_.reset(new tf2_ros::Buffer(this->get_clock()));
   tfListener_.reset(new tf2_ros::TransformListener(*tfBuffer_));
-  auto callable = [this]() { icpWorker(); };
-  icpWorker_ = std::thread(callable);
 }
 
 void ICPlocalization::initialize() {
@@ -184,7 +190,7 @@ void ICPlocalization::initialize() {
   std::cout << "imu data topic: " << imuDataTopic << std::endl;
 
   isUseOdometry_ =
-      this->declare_parameter("icp_localization_ros2.is_use_odometry", false);
+      this->declare_parameter("icp_localization_ros2.is_use_odometry", true);
   std::cout << "Is use odometry: " << std::boolalpha << isUseOdometry_ << "\n";
 
   tfPublisher_->setOdometryTopic(odometryDataTopic);
@@ -258,6 +264,10 @@ void ICPlocalization::initialize() {
           "/initialpose", rclcpp::QoS(rclcpp::KeepLast(1)),
           std::bind(&ICPlocalization::set2DPoseCallback, this,
                     std::placeholders::_1));
+
+  // Start the ICP worker after rate_ is set
+  auto callable = [this]() { icpWorker(); };
+  icpWorker_ = std::thread(callable);
 }
 
 DP ICPlocalization::fromPCL(const Pointcloud &pcl) {
@@ -274,6 +284,15 @@ const std::string &ICPlocalization::getFixedFrame() const {
 
 void ICPlocalization::matchScans() {
   if (!icp_.hasMap()) {
+    return;
+  }
+
+  // Skip if the accumulated cloud is invalid (non-dense / mismatched counts)
+  if (!hasMatchingPointCounts(regCloud_)) {
+    RCLCPP_WARN_STREAM(this->get_logger(),
+                       "Skipping scan in matchScans: features cols="
+                           << regCloud_.features.cols()
+                           << " descriptors cols=" << regCloud_.descriptors.cols());
     return;
   }
 
@@ -370,32 +389,57 @@ void ICPlocalization::publishRegisteredCloud() const {
   registeredCloudPublisher_->publish(ros_msg);
 }
 
-void ICPlocalization::icpWorker() {
-  rclcpp::Rate r(rate_);
-  // ros::Rate r(100);
+void ICPlocalization::icpWorker() 
+{
+  rclcpp::Rate r(100); 
+
+  rclcpp::Time last_icp_time = this->now();
+  
+  const double icp_wait_seconds = rate_;
+
   while (rclcpp::ok()) {
+    bool is_time_for_icp = (this->now() - last_icp_time).seconds() >= icp_wait_seconds;
+
     const bool frameReady = frameTracker_->isReady();
     const bool scanReady = rangeDataAccumulator_->isAccumulatedRangeDataReady();
 
-    if (scanReady && frameReady) {
+    // 4. Modify condition: strict check for Time + Data
+    if (is_time_for_icp && scanReady && frameReady) {
+      
+      // Reset the timer immediately
+      last_icp_time = this->now();
+
       regCloudTimestamp_ =
           rangeDataAccumulator_->getAccumulatedRangeDataTimestamp();
       regCloud_ = rangeDataAccumulator_->popAccumulatedRangeData().data_;
 
+      if (!hasMatchingPointCounts(regCloud_)) {
+        RCLCPP_WARN_STREAM(this->get_logger(),
+                           "Skipping non-dense scan: features cols="
+                               << regCloud_.features.cols()
+                               << " descriptors cols="
+                               << regCloud_.descriptors.cols());
+        // Do not sleep here; just continue so TFs keep publishing
+        continue;
+      }
+
       namespace ch = std::chrono;
       const auto startTime = ch::steady_clock::now();
+      
+      // --- Heavy Computation ---
       matchScans();
+      
       const auto endTime = ch::steady_clock::now();
-      const unsigned int nUs =
-          ch::duration_cast<ch::microseconds>(endTime - startTime).count();
-      const double timeMs = nUs / 1000.0;
-      RCLCPP_INFO_STREAM(this->get_logger(),
-                       "Scan matching took: " << timeMs << " ms");
+      const double timeMs = 
+          ch::duration_cast<ch::microseconds>(endTime - startTime).count() / 1000.0;
+      
+      RCLCPP_INFO_STREAM(this->get_logger(), "Scan matching took: " << timeMs << " ms");
 
       publishPose();
       publishRegisteredCloud();
+
     } else {
-      // Between scans: publish the latest transform at 100 Hz
+      // 5. This block now runs frequently (100 Hz) while waiting for the timer
       if (frameReady && !isFirstScanMatch_) {
         if (isUseOdometry_) {
           tfPublisher_->publishMapToOdom(optimizedPoseTimestamp_);
@@ -405,8 +449,60 @@ void ICPlocalization::icpWorker() {
       }
     }
 
+    // 6. Sleep for only 0.01 seconds (100 Hz)
     r.sleep();
   }
 }
 
+// void ICPlocalization::icpWorker() 
+// {
+//   rclcpp::Rate r(rate_);
+//   // ros::Rate r(100);
+//   while (rclcpp::ok()) {
+//     const bool frameReady = frameTracker_->isReady();
+//     const bool scanReady = rangeDataAccumulator_->isAccumulatedRangeDataReady();
+
+//     if (scanReady && frameReady) {
+//       regCloudTimestamp_ =
+//           rangeDataAccumulator_->getAccumulatedRangeDataTimestamp();
+//       regCloud_ = rangeDataAccumulator_->popAccumulatedRangeData().data_;
+
+//       // Validate the cloud before processing to avoid PointMatcher::DataPoints::InvalidField
+//       if (!hasMatchingPointCounts(regCloud_)) {
+//         RCLCPP_WARN_STREAM(this->get_logger(),
+//                            "Skipping non-dense scan: features cols="
+//                                << regCloud_.features.cols()
+//                                << " descriptors cols="
+//                                << regCloud_.descriptors.cols());
+//         r.sleep();
+//         continue;
+//       }
+
+//       namespace ch = std::chrono;
+//       const auto startTime = ch::steady_clock::now();
+//       matchScans();
+//       const auto endTime = ch::steady_clock::now();
+//       const unsigned int nUs =
+//           ch::duration_cast<ch::microseconds>(endTime - startTime).count();
+//       const double timeMs = nUs / 1000.0;
+//       std::cout << "Rate: " << rate_ << " Hz, " <<std::endl;
+//       RCLCPP_INFO_STREAM(this->get_logger(),
+//                        "Scan matching took: " << timeMs << " ms");
+
+//       publishPose();
+//       publishRegisteredCloud();
+//     } else {
+//       // Between scans: publish the latest transform at 100 Hz
+//       if (frameReady && !isFirstScanMatch_) {
+//         if (isUseOdometry_) {
+//           tfPublisher_->publishMapToOdom(optimizedPoseTimestamp_);
+//         } else {
+//           tfPublisher_->publishMapToRangeSensor(optimizedPoseTimestamp_);
+//         }
+//       }
+//     }
+
+//     r.sleep();
+//   }
+// }
 } // namespace icp_loco

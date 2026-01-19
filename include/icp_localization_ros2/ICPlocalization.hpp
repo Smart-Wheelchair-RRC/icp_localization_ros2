@@ -86,11 +86,11 @@ private:
   std::shared_ptr<tf2_ros::TransformListener> tfListener_;
   std::shared_ptr<tf2_ros::Buffer> tfBuffer_;
   bool isFirstScanMatch_ = true;
-  bool isUseOdometry_ = false;
+  bool isUseOdometry_ = true;
   bool isSetPoseFromUser_ = false;
   std::string fixedFrame_ = "map";
 
-  double rate_ = 1.0;
+  double rate_ = 10.0;
 };
 
 } // namespace icp_loco
