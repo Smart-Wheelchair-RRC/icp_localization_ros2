@@ -89,6 +89,8 @@ private:
   bool isUseOdometry_ = false;
   bool isSetPoseFromUser_ = false;
   std::string fixedFrame_ = "map";
+
+  double rate_ = 1.0;
 };
 
 } // namespace icp_loco

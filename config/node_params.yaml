@@ -1,12 +1,12 @@
 /icp_localization:
   ros__parameters:
-    pcd_file_path: "/home/fyt/fyt2024-sentry/test.pcd"
+    pcd_file_path: "/home/container_user/wheelchair2/src/lab_map_with_outside_corridor.pcd"
     input_filters_config_path: "config/input_filteres_mid360.yaml"
     
     icp_localization_ros2:
-      range_data_topic: "/cloud_registered_body"
+      range_data_topic: "/livox/lidar_inverted"
       num_accumulated_range_data: 1
-      imu_data_topic: "/imu/data"
+      imu_data_topic: "/livox/imu_inverted"
       odometry_data_topic: "/Odometry"
       is_use_odometry: true
       is_provide_odom_frame: true

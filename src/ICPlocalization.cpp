@@ -243,6 +243,9 @@ void ICPlocalization::initialize() {
       this->declare_parameter("icp_localization_ros2.fixed_frame", "map");
   std::cout << "Setting fixed frame to: " << fixedFrame_ << std::endl;
 
+  rate_ = this->declare_parameter("icp_localization_ros2.rate", 1.0);
+  std::cout << "Setting rate to: " << rate_ << std::endl;
+
   rangeDataAccumulator_->setParam(rangeDataAccParam);
   rangeDataAccumulator_->initialize();
   tfPublisher_->initialize();
@@ -368,33 +371,39 @@ void ICPlocalization::publishRegisteredCloud() const {
 }
 
 void ICPlocalization::icpWorker() {
-  rclcpp::Rate r(100);
+  rclcpp::Rate r(rate_);
   // ros::Rate r(100);
   while (rclcpp::ok()) {
-    if (!rangeDataAccumulator_->isAccumulatedRangeDataReady() ||
-        !frameTracker_->isReady()) {
-      r.sleep();
-      continue;
+    const bool frameReady = frameTracker_->isReady();
+    const bool scanReady = rangeDataAccumulator_->isAccumulatedRangeDataReady();
+
+    if (scanReady && frameReady) {
+      regCloudTimestamp_ =
+          rangeDataAccumulator_->getAccumulatedRangeDataTimestamp();
+      regCloud_ = rangeDataAccumulator_->popAccumulatedRangeData().data_;
+
+      namespace ch = std::chrono;
+      const auto startTime = ch::steady_clock::now();
+      matchScans();
+      const auto endTime = ch::steady_clock::now();
+      const unsigned int nUs =
+          ch::duration_cast<ch::microseconds>(endTime - startTime).count();
+      const double timeMs = nUs / 1000.0;
+      RCLCPP_INFO_STREAM(this->get_logger(),
+                       "Scan matching took: " << timeMs << " ms");
+
+      publishPose();
+      publishRegisteredCloud();
+    } else {
+      // Between scans: publish the latest transform at 100 Hz
+      if (frameReady && !isFirstScanMatch_) {
+        if (isUseOdometry_) {
+          tfPublisher_->publishMapToOdom(optimizedPoseTimestamp_);
+        } else {
+          tfPublisher_->publishMapToRangeSensor(optimizedPoseTimestamp_);
+        }
+      }
     }
-    regCloudTimestamp_ =
-        rangeDataAccumulator_->getAccumulatedRangeDataTimestamp();
-    regCloud_ = rangeDataAccumulator_->popAccumulatedRangeData().data_;
-    namespace ch = std::chrono;
-    const auto startTime = ch::steady_clock::now();
-    matchScans();
-    const auto endTime = ch::steady_clock::now();
-    const unsigned int nUs =
-        ch::duration_cast<ch::microseconds>(endTime - startTime).count();
-    const double timeMs = nUs / 1000.0;
-    //    std::string infoStr = "Scan matching took: " +
-    //    std::to_string(timeMs)
-    //    + " ms \n"; ROS_INFO_STREAM(infoStr);
-
-    //    ROS_INFO_STREAM_THROTTLE(10.0, "Scan matching took: " << timeMs
-    //    << " ms");
-
-    publishPose();
-    publishRegisteredCloud();
 
     r.sleep();
   }
