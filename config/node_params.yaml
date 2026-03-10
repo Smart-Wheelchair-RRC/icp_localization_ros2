@@ -1,12 +1,13 @@
 /icp_localization:
   ros__parameters:
-    pcd_file_path: "/home/container_user/wheelchair2/src/lab_map_with_outside_corridor.pcd"
+    # pcd_file_path: "/home/container_user/wheelchair2/src/wheelchair2_navigation/maps/rrc/lab_map_with_outside_corridor.pcd"
+    pcd_file_path: "/home/container_user/wheelchair2/src/wheelchair2_navigation/maps/ramps/rrc_outside_himalaya_ramps.pcd"
     input_filters_config_path: "config/input_filteres_mid360.yaml"
     
     icp_localization_ros2:
-      range_data_topic: "/livox/lidar_inverted"
+      range_data_topic: "/livox/lidar"
       num_accumulated_range_data: 1
-      imu_data_topic: "/livox/imu_inverted"
+      imu_data_topic: "/livox/imu"
       odometry_data_topic: "/Odometry"
       is_use_odometry: true
       is_provide_odom_frame: true

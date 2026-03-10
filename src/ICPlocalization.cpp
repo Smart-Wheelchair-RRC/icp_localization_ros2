@@ -59,6 +59,9 @@ ICPlocalization::ICPlocalization(const rclcpp::NodeOptions &options)
 }
 
 ICPlocalization::~ICPlocalization() {
+  if (tfRepublishTimer_) {
+    tfRepublishTimer_->cancel();
+  }
   icpWorker_.join();
   Rigid3d lastPose(lastPosition_, lastOrientation_);
   std::cout << "ICP_LOCO: Last transform map to range sensor: \n";
@@ -255,6 +258,20 @@ void ICPlocalization::initialize() {
   rangeDataAccumulator_->setParam(rangeDataAccParam);
   rangeDataAccumulator_->initialize();
   tfPublisher_->initialize();
+
+  // Re-publish the latest map→odom TF at 100 Hz on the executor thread,
+  // so the transform stays fresh even while matchScans() blocks the worker.
+  tfRepublishTimer_ = this->create_wall_timer(
+      std::chrono::milliseconds(10),
+      [this]() {
+        if (!isFirstScanMatch_.load() && frameTracker_->isReady()) {
+          if (isUseOdometry_) {
+            tfPublisher_->publishMapToOdom(optimizedPoseTimestamp_);
+          } else {
+            tfPublisher_->publishMapToRangeSensor(optimizedPoseTimestamp_);
+          }
+        }
+      });
 
   std::cout << "ICPlocalization: Initialized \n";
 

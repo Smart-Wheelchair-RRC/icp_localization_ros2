@@ -31,6 +31,15 @@ def generate_launch_description():
         description='ICPlocalization loop rate in Hz'
     )
 
+    # Initial pose launch arguments
+    init_pose_args = []
+    for name, default in [('initial_pose_x', '0.0'), ('initial_pose_y', '0.0'),
+                          ('initial_pose_z', '0.0'), ('initial_pose_roll', '0.0'),
+                          ('initial_pose_pitch', '0.0'), ('initial_pose_yaw', '0.0')]:
+        init_pose_args.append(
+            DeclareLaunchArgument(name, default_value=default, description=f'Initial pose {name}')
+        )
+
     icp_node = Node(
         package='icp_localization_ros2',
         executable='icp_localization',
@@ -42,6 +51,13 @@ def generate_launch_description():
                 'input_filters_config_path': input_filters_config_path,
                 # Pass the rate as a typed parameter
                 'icp_localization_ros2.rate': ParameterValue(LaunchConfiguration('rate'), value_type=float),
+                # Initial pose parameters (override defaults from node_params.yaml)
+                'initial_pose.x': LaunchConfiguration('initial_pose_x'),
+                'initial_pose.y': LaunchConfiguration('initial_pose_y'),
+                'initial_pose.z': LaunchConfiguration('initial_pose_z'),
+                'initial_pose.roll': LaunchConfiguration('initial_pose_roll'),
+                'initial_pose.pitch': LaunchConfiguration('initial_pose_pitch'),
+                'initial_pose.yaw': LaunchConfiguration('initial_pose_yaw'),
             }
         ],
     )
@@ -53,5 +69,6 @@ def generate_launch_description():
     
     return LaunchDescription([
         rate_arg,
+        *init_pose_args,
         delay_node, 
     ])

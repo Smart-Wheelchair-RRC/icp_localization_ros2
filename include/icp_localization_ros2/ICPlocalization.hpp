@@ -11,6 +11,7 @@
 #include <rclcpp/rclcpp.hpp>
 // #include <ros/ros.h>
 #include "pointmatcher/PointMatcher.h"
+#include <atomic>
 #include <thread>
 
 #include "icp_localization_ros2/RangeDataAccumulator.hpp"
@@ -85,12 +86,13 @@ private:
   std::shared_ptr<ImuTracker> imuTracker_;
   std::shared_ptr<tf2_ros::TransformListener> tfListener_;
   std::shared_ptr<tf2_ros::Buffer> tfBuffer_;
-  bool isFirstScanMatch_ = true;
+  std::atomic<bool> isFirstScanMatch_{true};
   bool isUseOdometry_ = true;
   bool isSetPoseFromUser_ = false;
   std::string fixedFrame_ = "map";
 
   double rate_ = 10.0;
+  rclcpp::TimerBase::SharedPtr tfRepublishTimer_;
 };
 
 } // namespace icp_loco
