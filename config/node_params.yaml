@@ -1,7 +1,7 @@
 /icp_localization:
   ros__parameters:
-    # pcd_file_path: "/home/container_user/wheelchair2/src/wheelchair2_navigation/maps/rrc/lab_map_with_outside_corridor.pcd"
-    pcd_file_path: "/home/container_user/wheelchair2/src/wheelchair2_navigation/maps/ramps/rrc_outside_himalaya_ramps.pcd"
+    pcd_file_path: "/home/container_user/wheelchair2/src/wheelchair2_navigation/maps/rrc/lab_map_with_outside_corridor.pcd"
+    # pcd_file_path: "/home/container_user/wheelchair2/src/wheelchair2_navigation/maps/ramps/rrc_outside_himalaya_ramps.pcd"
     input_filters_config_path: "config/input_filteres_mid360.yaml"
     
     icp_localization_ros2:
@@ -10,7 +10,7 @@
       imu_data_topic: "/livox/imu"
       odometry_data_topic: "/Odometry"
       is_use_odometry: true
-      is_provide_odom_frame: true
+      is_provide_odom_frame: false
       gravity_vector_filter_time_constant: 0.01
       fixed_frame: "map"
       min_num_odom_msgs_before_ready: 5

@@ -196,9 +196,14 @@ void ICPlocalization::initialize() {
       this->declare_parameter("icp_localization_ros2.is_use_odometry", true);
   std::cout << "Is use odometry: " << std::boolalpha << isUseOdometry_ << "\n";
 
+  const bool isProvideOdomFrame = this->declare_parameter(
+      "icp_localization_ros2.is_provide_odom_frame", true);
+  std::cout << "Is provide odom frame: " << std::boolalpha
+            << isProvideOdomFrame << "\n";
+
   tfPublisher_->setOdometryTopic(odometryDataTopic);
   tfPublisher_->setImuTopic(imuDataTopic);
-  tfPublisher_->setIsProvideOdomFrame(isUseOdometry_);
+  tfPublisher_->setIsProvideOdomFrame(isProvideOdomFrame);
 
   const double gravityVectorFilterTimeConstant = this->declare_parameter(
       "icp_localization_ros2.gravity_vector_filter_time_constant", 0.01);

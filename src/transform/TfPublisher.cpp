@@ -88,7 +88,7 @@ void TfPublisher::publishMapToOdom(const Time &t) {
   const auto mapToOdom = frameTracker_->getTransformMapToOdom(t);
   geometry_msgs::msg::TransformStamped transformStamped =
       toRos(mapToOdom, t, "map", "odom");
-  transformStamped.header.stamp = nh_->now();
+  transformStamped.header.stamp = nh_->now() + rclcpp::Duration::from_seconds(0.1);
   tfBroadcaster_->sendTransform(transformStamped);
   // just for debug
 
