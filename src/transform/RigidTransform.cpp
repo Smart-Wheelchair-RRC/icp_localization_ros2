@@ -33,7 +33,7 @@ TimestampedTransform interpolate(const TimestampedTransform& start,
     std::cout << "Start time: " << start.time_ << std::endl;
     std::cout << "End time: " << end.time_ << std::endl;
     std::cout << "Query time: " << time << std::endl;
-    throw std::runtime_error("transform interpolate:: query time is not between start and end time");
+    std::cerr << "transform interpolate:: query time is not between start and end time" << std::endl;
   }
 
   const double duration = toSeconds(end.time_ - start.time_);

@@ -1,9 +1,9 @@
 #reference filters get applied to the map and to the icp
 referenceDataPointsFilters:
-#  - MaxDistDataPointsFilter:
-#      maxDist: 20.0
+  - MaxDistDataPointsFilter:
+      maxDist: 30.0
   - RandomSamplingDataPointsFilter:
-      prob: 1.0
+      prob: 0.3
   - SurfaceNormalDataPointsFilter:
       knn: 5
       epsilon: 0
@@ -13,13 +13,13 @@ referenceDataPointsFilters:
   - OrientNormalsDataPointsFilter 
 matcher:
   KDTreeMatcher:
-    knn: 3
-    maxDist: 10.0
-    epsilon: 1.0
+    knn: 1
+    maxDist: 3.0
+    epsilon: 3.16
 
 outlierFilters:
   - TrimmedDistOutlierFilter:
-     ratio: 0.8
+     ratio: 0.65
   - SurfaceNormalOutlierFilter:
      maxAngle: 1.57
 
@@ -32,7 +32,7 @@ transformationCheckers:
       minDiffTransErr: 0.01
       smoothLength: 2
   - CounterTransformationChecker:
-      maxIterationCount: 40
+      maxIterationCount: 15
   - BoundTransformationChecker:
       maxRotationNorm: 0.8
       maxTranslationNorm: 30.00
