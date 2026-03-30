@@ -3,7 +3,7 @@
     pcd_file_path: "/home/container_user/wheelchair2/src/wheelchair2_navigation/maps/rrc/lab_map_with_outside_corridor.pcd"
     # pcd_file_path: "/home/container_user/wheelchair2/src/wheelchair2_navigation/maps/ramps/rrc_outside_himalaya_ramps.pcd"
     # pcd_file_path: "/home/container_user/wheelchair2/src/wheelchair2_navigation/maps/himalaya/with_classroom/himalaya_with_classroom_ICP.pcd"
-    input_filters_config_path: "config/input_filteres_mid360.yaml"
+    input_filters_config_path: "config/input_filters_mid360.yaml"
     
     icp_localization_ros2:
       range_data_topic: "/livox/lidar"
