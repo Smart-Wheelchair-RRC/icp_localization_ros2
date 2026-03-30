@@ -19,7 +19,7 @@ def generate_launch_description():
         get_package_share_directory('icp_localization_ros2'), 'config', 'node_params.yaml')
 
     input_filters_config_path = os.path.join(
-        get_package_share_directory('icp_localization_ros2'), 'config', 'input_filters_velodyne_puck.yaml')
+        get_package_share_directory('icp_localization_ros2'), 'config', 'input_filters_mid360.yaml')
     
     icp_config_path = os.path.join(
         get_package_share_directory('icp_localization_ros2'), 'config', 'icp.yaml')
