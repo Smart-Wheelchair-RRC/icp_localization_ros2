@@ -24,11 +24,17 @@ def generate_launch_description():
     icp_config_path = os.path.join(
         get_package_share_directory('icp_localization_ros2'), 'config', 'icp.yaml')
 
-    # Launch argument for rate
-    rate_arg = DeclareLaunchArgument(
-        'rate',
-        default_value='1.0',
-        description='ICPlocalization loop rate in Hz'
+    # Launch argument for period (replaces rate)
+    period_arg = DeclareLaunchArgument(
+        'period',
+        default_value='3.0',
+        description='ICP localization loop period in seconds'
+    )
+
+    # Launch argument for the PCD map
+    pcd_map_path_arg = DeclareLaunchArgument(
+        'pcd_map_path',
+        description='Absolute path to the pointcloud map file (.pcd)'
     )
 
     # Initial pose launch arguments
@@ -49,8 +55,10 @@ def generate_launch_description():
             {
                 'icp_config_path': icp_config_path,
                 'input_filters_config_path': input_filters_config_path,
-                # Pass the rate as a typed parameter
-                'icp_localization_ros2.rate': ParameterValue(LaunchConfiguration('rate'), value_type=float),
+                # Pass the period as a typed parameter
+                'icp_localization_ros2.rate': ParameterValue(LaunchConfiguration('period'), value_type=float),
+                # Map the map path argument to the node's specific parameter name
+                'pcd_file_path': LaunchConfiguration('pcd_map_path'),
                 # Initial pose parameters (override defaults from node_params.yaml)
                 'initial_pose.x': LaunchConfiguration('initial_pose_x'),
                 'initial_pose.y': LaunchConfiguration('initial_pose_y'),
@@ -68,7 +76,8 @@ def generate_launch_description():
     )
     
     return LaunchDescription([
-        rate_arg,
+        period_arg,
+        pcd_map_path_arg,
         *init_pose_args,
         delay_node, 
     ])
