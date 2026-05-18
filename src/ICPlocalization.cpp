@@ -29,6 +29,9 @@
 #include <rclcpp/qos.hpp>
 #include <rclcpp/utilities.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_srvs/srv/set_bool.hpp>
+#include <std_srvs/srv/empty.hpp>
+#include <example_interfaces/srv/set_string.hpp>
 #include <thread>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <filesystem>
@@ -118,7 +121,7 @@ void ICPlocalization::initializeInternal() {
       std::make_shared<RangeDataAccumulatorRos>(this->shared_from_this());
   imuTracker_ = std::make_shared<ImuTracker>();
   frameTracker_ = std::make_shared<FrameTracker>(imuTracker_);
-  tfPublisher_ = std::make_shared<TfPublisher>(this->shared_from_this(),
+  tfPublisher = std::make_shared<TfPublisher>(this->shared_from_this(),
                                                frameTracker_, imuTracker_);
 
   lastPosition_.setZero();
@@ -137,6 +140,20 @@ void ICPlocalization::initializeInternal() {
   // Initialite tf listener
   tfBuffer_.reset(new tf2_ros::Buffer(this->get_clock()));
   tfListener_.reset(new tf2_ros::TransformListener(*tfBuffer_));
+
+  // Initialize Services
+  this->is_paused_ = false;
+  this->pause_localization_srv_ = this->create_service<std_srvs::srv::SetBool>(
+      "pause_localization",
+      std::bind(&ICPlocalization::callbackPauseLocalization, this, std::placeholders::_1, std::placeholders::_2));
+
+  this->reset_localization_srv_ = this->create_service<std_srvs::srv::Empty>(
+      "reset_localization",
+      std::bind(&ICPlocalization::callbackResetLocalization, this, std::placeholders::_1, std::placeholders::_2));
+
+  this->load_map_srv_ = this->create_service<example_interfaces::srv::SetString>(
+      "load_map",
+      std::bind(&ICPlocalization::callbackLoadMap, this, std::placeholders::_1, std::placeholders::_2));
 }
 
 void ICPlocalization::initialize() {
@@ -321,7 +338,7 @@ void ICPlocalization::matchScans() {
   Eigen::Vector3d initPosition = lastPosition_;
   Eigen::Quaterniond initOrientation = lastOrientation_;
   Rigid3d before(lastPosition_, lastOrientation_);
-  if (!isFirstScanMatch_) {
+  if (!isFirstScanMatch_.load()) {
     const Rigid3d lastPose(initPosition, initOrientation);
     const Rigid3d motionPoseChange =
         frameTracker_->getPoseChangeOfRangeSensorInMapFrame(
@@ -337,7 +354,7 @@ void ICPlocalization::matchScans() {
   PM::TransformationParameters initPose;
   // Compute the transformation to express data in ref
   inputFilters_.apply(regCloud_);
-  //	optimizedPose_ = initPose;
+  //  optimizedPose_ = initPose;
   if (!isSetPoseFromUser_) {
     try {
       initPose = getTransformationMatrix<float>(toFloat(initPosition),
@@ -425,8 +442,8 @@ void ICPlocalization::icpWorker()
     const bool frameReady = frameTracker_->isReady();
     const bool scanReady = rangeDataAccumulator_->isAccumulatedRangeDataReady();
 
-    // 4. Modify condition: strict check for Time + Data
-    if (is_time_for_icp && scanReady && frameReady) {
+    // 4. Modify condition: strict check for Time + Data + Not Paused
+    if (is_time_for_icp && scanReady && frameReady && !this->is_paused_.load()) {
       
       // Reset the timer immediately
       last_icp_time = this->now();
@@ -461,8 +478,8 @@ void ICPlocalization::icpWorker()
       publishRegisteredCloud();
 
     } else {
-      // 5. This block now runs frequently (100 Hz) while waiting for the timer
-      if (frameReady && !isFirstScanMatch_) {
+      // 5. This block now runs frequently (100 Hz) while waiting for the timer or when paused
+      if (frameReady && !isFirstScanMatch_.load()) {
         if (isUseOdometry_) {
           tfPublisher_->publishMapToOdom(optimizedPoseTimestamp_);
         } else {
@@ -476,55 +493,56 @@ void ICPlocalization::icpWorker()
   }
 }
 
-// void ICPlocalization::icpWorker() 
-// {
-//   rclcpp::Rate r(rate_);
-//   // ros::Rate r(100);
-//   while (rclcpp::ok()) {
-//     const bool frameReady = frameTracker_->isReady();
-//     const bool scanReady = rangeDataAccumulator_->isAccumulatedRangeDataReady();
+void ICPlocalization::callbackPauseLocalization(const std::shared_ptr<std_srvs::srv::SetBool::Request> req,
+                                                std::shared_ptr<std_srvs::srv::SetBool::Response> res) {
+  this->is_paused_ = req->data;
+  res->success = true;
+  res->message = this->is_paused_ ? "ICP Localization PAUSED" : "ICP Localization RESUMED";
+}
 
-//     if (scanReady && frameReady) {
-//       regCloudTimestamp_ =
-//           rangeDataAccumulator_->getAccumulatedRangeDataTimestamp();
-//       regCloud_ = rangeDataAccumulator_->popAccumulatedRangeData().data_;
+void ICPlocalization::callbackResetLocalization(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+                                                std::shared_ptr<std_srvs::srv::Empty::Response> res) {
+  (void)req;
+  (void)res;
 
-//       // Validate the cloud before processing to avoid PointMatcher::DataPoints::InvalidField
-//       if (!hasMatchingPointCounts(regCloud_)) {
-//         RCLCPP_WARN_STREAM(this->get_logger(),
-//                            "Skipping non-dense scan: features cols="
-//                                << regCloud_.features.cols()
-//                                << " descriptors cols="
-//                                << regCloud_.descriptors.cols());
-//         r.sleep();
-//         continue;
-//       }
+  this->isFirstScanMatch_ = true;
+  this->isSetPoseFromUser_ = false;
 
-//       namespace ch = std::chrono;
-//       const auto startTime = ch::steady_clock::now();
-//       matchScans();
-//       const auto endTime = ch::steady_clock::now();
-//       const unsigned int nUs =
-//           ch::duration_cast<ch::microseconds>(endTime - startTime).count();
-//       const double timeMs = nUs / 1000.0;
-//       std::cout << "Rate: " << rate_ << " Hz, " <<std::endl;
-//       RCLCPP_INFO_STREAM(this->get_logger(),
-//                        "Scan matching took: " << timeMs << " ms");
+  this->lastPosition_.setZero();
+  this->lastOrientation_.setIdentity();
 
-//       publishPose();
-//       publishRegisteredCloud();
-//     } else {
-//       // Between scans: publish the latest transform at 100 Hz
-//       if (frameReady && !isFirstScanMatch_) {
-//         if (isUseOdometry_) {
-//           tfPublisher_->publishMapToOdom(optimizedPoseTimestamp_);
-//         } else {
-//           tfPublisher_->publishMapToRangeSensor(optimizedPoseTimestamp_);
-//         }
-//       }
-//     }
+  if (this->imuTracker_) {
+    this->imuTracker_->setInitialPose(this->lastPosition_, this->lastOrientation_);
+  }
+  if (this->tfPublisher_) {
+    this->tfPublisher_->setInitialPose(this->lastPosition_, this->lastOrientation_);
+  }
+  if (this->rangeDataAccumulator_) {
+    while (this->rangeDataAccumulator_->isAccumulatedRangeDataReady()) {
+      this->rangeDataAccumulator_->popAccumulatedRangeData();
+    }
+  }
+}
 
-//     r.sleep();
-//   }
-// }
+void ICPlocalization::callbackLoadMap(const std::shared_ptr<example_interfaces::srv::SetString::Request> req,
+                                      std::shared_ptr<example_interfaces::srv::SetString::Response> res) {
+  std::string pcd_path = req->data;
+
+  RCLCPP_INFO(this->get_logger(), "Loading new floor PCD map from: %s", pcd_path.c_str());
+
+  pcl::PointCloud<PointType>::Ptr new_map(new pcl::PointCloud<PointType>);
+
+  if (pcl::io::loadPCDFile<PointType>(pcd_path, *new_map) == -1) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to read PCD file: %s", pcd_path.c_str());
+    res->success = false;
+    res->message = "Failed to read PCD file from disk.";
+    return;
+  }
+
+  this->setMapCloud(new_map);
+
+  res->success = true;
+  res->message = "Successfully loaded new floor map into ICP engine.";
+}
+
 } // namespace icp_loco

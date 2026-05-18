@@ -27,6 +27,9 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
+#include <std_srvs/srv/set_bool.hpp>
+#include <std_srvs/srv/empty.hpp>
+#include <example_interfaces/srv/set_string.hpp>
 #include <thread>
 
 namespace icp_loco {
@@ -56,6 +59,15 @@ public:
   void initializeInternal();
 
 private:
+  void callbackPauseLocalization(const std::shared_ptr<std_srvs::srv::SetBool::Request> req,
+                                 std::shared_ptr<std_srvs::srv::SetBool::Response> res);
+
+  void callbackResetLocalization(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+                                 std::shared_ptr<std_srvs::srv::Empty::Response> res);
+
+  void callbackLoadMap(const std::shared_ptr<example_interfaces::srv::SetString::Request> req,
+                       std::shared_ptr<example_interfaces::srv::SetString::Response> res);
+
   Eigen::Vector3d userSetPosition_;
   Eigen::Quaterniond userSetQuaternion_;
   Eigen::Vector3d lastPosition_;
@@ -93,6 +105,11 @@ private:
 
   double rate_ = 10.0;
   rclcpp::TimerBase::SharedPtr tfRepublishTimer_;
+
+  std::atomic<bool> is_paused_{false};
+  rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr pause_localization_srv_;
+  rclcpp::Service<std_srvs::srv::Empty>::SharedPtr reset_localization_srv_;
+  rclcpp::Service<example_interfaces::srv::SetString>::SharedPtr load_map_srv_;
 };
 
 } // namespace icp_loco
