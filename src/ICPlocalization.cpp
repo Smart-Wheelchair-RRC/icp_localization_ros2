@@ -545,4 +545,56 @@ void ICPlocalization::callbackLoadMap(const std::shared_ptr<example_interfaces::
   res->message = "Successfully loaded new floor map into ICP engine.";
 }
 
+// void ICPlocalization::icpWorker() 
+// {
+//   rclcpp::Rate r(rate_);
+//   // ros::Rate r(100);
+//   while (rclcpp::ok()) {
+//     const bool frameReady = frameTracker_->isReady();
+//     const bool scanReady = rangeDataAccumulator_->isAccumulatedRangeDataReady();
+
+//     if (scanReady && frameReady) {
+//       regCloudTimestamp_ =
+//           rangeDataAccumulator_->getAccumulatedRangeDataTimestamp();
+//       regCloud_ = rangeDataAccumulator_->popAccumulatedRangeData().data_;
+
+//       // Validate the cloud before processing to avoid PointMatcher::DataPoints::InvalidField
+//       if (!hasMatchingPointCounts(regCloud_)) {
+//         RCLCPP_WARN_STREAM(this->get_logger(),
+//                            "Skipping non-dense scan: features cols="
+//                                << regCloud_.features.cols()
+//                                << " descriptors cols="
+//                                << regCloud_.descriptors.cols());
+//         r.sleep();
+//         continue;
+//       }
+
+//       namespace ch = std::chrono;
+//       const auto startTime = ch::steady_clock::now();
+//       matchScans();
+//       const auto endTime = ch::steady_clock::now();
+//       const unsigned int nUs =
+//           ch::duration_cast<ch::microseconds>(endTime - startTime).count();
+//       const double timeMs = nUs / 1000.0;
+//       std::cout << "Rate: " << rate_ << " Hz, " <<std::endl;
+//       RCLCPP_INFO_STREAM(this->get_logger(),
+//                        "Scan matching took: " << timeMs << " ms");
+
+//       publishPose();
+//       publishRegisteredCloud();
+//     } else {
+//       // Between scans: publish the latest transform at 100 Hz
+//       if (frameReady && !isFirstScanMatch_) {
+//         if (isUseOdometry_) {
+//           tfPublisher_->publishMapToOdom(optimizedPoseTimestamp_);
+//         } else {
+//           tfPublisher_->publishMapToRangeSensor(optimizedPoseTimestamp_);
+//         }
+//       }
+//     }
+
+//     r.sleep();
+//   }
+// }
+
 } // namespace icp_loco
