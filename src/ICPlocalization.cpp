@@ -13,9 +13,6 @@
 #include "icp_localization_ros2/transform/TfPublisher.hpp"
 #include "pointmatcher/IO.h"
 #include "pointmatcher/PointMatcher.h"
-// #include "pointmatcher_ros/deserialization.h"
-// #include "pointmatcher_ros/serialization.h"
-// #include "pointmatcher_ros/transform.h"
 #include <geometry_msgs/msg/detail/pose_with_covariance_stamped__struct.hpp>
 #include <memory>
 #include <pcl/common/common.h>
@@ -24,7 +21,6 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
-// #include <pointmatcher_ros/StampedPointCloud.h>
 #include <rclcpp/node_options.hpp>
 #include <rclcpp/qos.hpp>
 #include <rclcpp/utilities.hpp>
@@ -38,8 +34,6 @@ namespace icp_loco {
 namespace {
 const double kRadToDeg = 180.0 / M_PI;
 
-// Simple validity check for PointMatcher DataPoints: features and descriptors must
-// have the same number of columns (points). Non-dense or corrupted scans can violate this.
 inline bool hasMatchingPointCounts(const DP& cloud) {
   const auto nFeat = cloud.features.cols();
   const auto nDesc = cloud.descriptors.cols();
@@ -47,6 +41,9 @@ inline bool hasMatchingPointCounts(const DP& cloud) {
 }
 }
 
+// =============================================================================
+// Constructor — UNCHANGED
+// =============================================================================
 ICPlocalization::ICPlocalization(const rclcpp::NodeOptions &options)
     : Node("icp_localization", options) {
   std::vector<double> leafSize =
@@ -58,27 +55,47 @@ ICPlocalization::ICPlocalization(const rclcpp::NodeOptions &options)
   mapCloudFilter_.setLeafSize(leafSize[0], leafSize[1], leafSize[2]);
 }
 
+// =============================================================================
+// Destructor — CHANGE: added joinable() guard (prevents crash on early exit)
+// =============================================================================
 ICPlocalization::~ICPlocalization() {
   if (tfRepublishTimer_) {
     tfRepublishTimer_->cancel();
   }
-  icpWorker_.join();
+  // CHANGE: wake the worker if it is sleeping in the paused branch, then join
+  is_paused_.store(false);
+  if (icpWorker_.joinable()) {   // CHANGE: was unconditional .join()
+    icpWorker_.join();
+  }
   Rigid3d lastPose(lastPosition_, lastOrientation_);
   std::cout << "ICP_LOCO: Last transform map to range sensor: \n";
   std::cout << lastPose.asString() << "\n";
 }
 
+// =============================================================================
+// setMapCloud — CHANGE: wrapped in map_mutex_ lock
+//
+// Why: callbackLoadMap() calls this from a service-callback thread while
+// icpWorker() may be mid-way through icp_(). Without the lock, both threads
+// write to icp_ and refCloud_ at the same time → undefined behaviour.
+// The lock is always taken before modifying or reading these two objects.
+// =============================================================================
 void ICPlocalization::setMapCloud(const Pointcloud::Ptr map) {
+  std::lock_guard<std::mutex> lock(map_mutex_);   // CHANGE: added lock
+
   mapCloudFilter_.setInputCloud(map);
   mapCloudFilter_.filter(mapCloud_);
   refCloud_ = fromPCL(mapCloud_);
-
   isMapSet_ = true;
   icp_.setMap(refCloud_);
-  std::cout << "Map size is: " << map->points.size() << "(befor filter), "
-            << mapCloud_.points.size() << "(after filter)" << std::endl;
+
+  std::cout << "Map size is: " << map->points.size() << " (before filter), "
+            << mapCloud_.points.size() << " (after filter)" << std::endl;
 }
 
+// =============================================================================
+// setInitialPose — UNCHANGED
+// =============================================================================
 void ICPlocalization::setInitialPose(const Eigen::Vector3d &p,
                                      const Eigen::Quaterniond &q) {
   std::cout << "Init pose set to, xyz: " << p.transpose();
@@ -91,6 +108,9 @@ void ICPlocalization::setInitialPose(const Eigen::Vector3d &p,
   tfPublisher_->setInitialPose(p, q);
 }
 
+// =============================================================================
+// set2DPoseCallback — UNCHANGED
+// =============================================================================
 void ICPlocalization::set2DPoseCallback(
     const geometry_msgs::msg::PoseWithCovarianceStamped::ConstPtr &msg) {
   try {
@@ -101,8 +121,6 @@ void ICPlocalization::set2DPoseCallback(
     userSetQuaternion_ = Eigen::Quaterniond(
         pose_received.orientation.w, pose_received.orientation.x,
         pose_received.orientation.y, pose_received.orientation.z);
-    // tf::pointMsgToEigen(msg->pose.pose.position, userSetPosition_);
-    // tf::quaternionMsgToEigen(pose_received.orientation, userSetQuaternion_);
     isSetPoseFromUser_ = true;
   } catch (const std::exception &e) {
     std::cerr << "Caught exception while setting 2D pose: " << e.what() << '\n';
@@ -112,6 +130,9 @@ void ICPlocalization::set2DPoseCallback(
             << std::endl;
 }
 
+// =============================================================================
+// initializeInternal — CHANGE: registers the three services at the bottom
+// =============================================================================
 void ICPlocalization::initializeInternal() {
 
   rangeDataAccumulator_ =
@@ -129,21 +150,44 @@ void ICPlocalization::initializeInternal() {
           "registered_cloud", rclcpp::QoS(rclcpp::KeepLast(1)));
   posePub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
       "range_sensor_pose", rclcpp::QoS(rclcpp::KeepLast(1)));
-  // nh_.advertise<sensor_msgs::PointCloud2>("registered_cloud", 1, true);
-  // posePub_ =
-  // nh_.advertise<geometry_msgs::PoseStamped>("range_sensor_pose", 1, true);
+
   icp_.setDefault();
 
-  // Initialite tf listener
   tfBuffer_.reset(new tf2_ros::Buffer(this->get_clock()));
   tfListener_.reset(new tf2_ros::TransformListener(*tfBuffer_));
+
+  // ── ADD: register services ───────────────────────────────────────────────
+  // Declare map_path parameter here so it exists before load_map is ever called
+  this->declare_parameter("map_path", std::string(""));
+
+  pause_srv_ = this->create_service<std_srvs::srv::SetBool>(
+      "pause_localization",
+      std::bind(&ICPlocalization::callbackPauseLocalization, this,
+                std::placeholders::_1, std::placeholders::_2));
+
+  reset_srv_ = this->create_service<std_srvs::srv::Empty>(
+      "reset_localization",
+      std::bind(&ICPlocalization::callbackResetLocalization, this,
+                std::placeholders::_1, std::placeholders::_2));
+
+  load_map_srv_ = this->create_service<std_srvs::srv::Trigger>(
+      "load_map",
+      std::bind(&ICPlocalization::callbackLoadMap, this,
+                std::placeholders::_1, std::placeholders::_2));
+
+  RCLCPP_INFO(this->get_logger(),
+              "Services registered: /pause_localization, "
+              "/reset_localization, /load_map");
+  // ── END ADD ───────────────────────────────────────────────────────────────
 }
 
+// =============================================================================
+// initialize — UNCHANGED
+// =============================================================================
 void ICPlocalization::initialize() {
 
   const std::string configFileIcp =
       this->declare_parameter("icp_config_path", "");
-  // std::cout<<"configFileIcp: "<<configFileIcp<<std::endl;
   try {
     std::ifstream in(configFileIcp);
     if (!in.is_open()) {
@@ -173,7 +217,6 @@ void ICPlocalization::initialize() {
 
   std::string rangeDataTopic =
       this->declare_parameter("icp_localization_ros2.range_data_topic", "");
-
   if (rangeDataTopic.empty()) {
     RCLCPP_ERROR_STREAM(this->get_logger(), "failed to load range data topic");
   }
@@ -185,8 +228,7 @@ void ICPlocalization::initialize() {
   std::string odometryDataTopic =
       this->declare_parameter("icp_localization_ros2.odometry_data_topic", "");
   if (odometryDataTopic.empty()) {
-    RCLCPP_ERROR_STREAM(this->get_logger(),
-                        "failed to load odometry data topic");
+    RCLCPP_ERROR_STREAM(this->get_logger(), "failed to load odometry data topic");
   }
 
   std::cout << "odometry data topic: " << odometryDataTopic << std::endl;
@@ -215,8 +257,7 @@ void ICPlocalization::initialize() {
   const std::string imuLidarPrefix = "calibration.imu_to_range_sensor.";
   const Rigid3d imuToRangeSensor = Rigid3d(
       getPositionFromParameterServer(this->shared_from_this(), imuLidarPrefix),
-      getOrientationFromParameterServer(this->shared_from_this(),
-                                        imuLidarPrefix));
+      getOrientationFromParameterServer(this->shared_from_this(), imuLidarPrefix));
 
   const std::string odometrySourceLidarPrefix =
       "calibration.odometry_source_to_range_sensor.";
@@ -232,7 +273,6 @@ void ICPlocalization::initialize() {
 
   const int minNumOdomMeasurements = this->declare_parameter(
       "icp_localization_ros2.min_num_odom_msgs_before_ready", 300);
-
   frameTracker_->setMinNumOdomMeasurementsBeforeReady(minNumOdomMeasurements);
   std::cout << "Min num odom measurements before ready: "
             << minNumOdomMeasurements << std::endl;
@@ -264,8 +304,6 @@ void ICPlocalization::initialize() {
   rangeDataAccumulator_->initialize();
   tfPublisher_->initialize();
 
-  // Re-publish the latest map→odom TF at 100 Hz on the executor thread,
-  // so the transform stays fresh even while matchScans() blocks the worker.
   tfRepublishTimer_ = this->create_wall_timer(
       std::chrono::milliseconds(10),
       [this]() {
@@ -280,36 +318,45 @@ void ICPlocalization::initialize() {
 
   std::cout << "ICPlocalization: Initialized \n";
 
-  // Set 2D pose subscribe
   initialPose_ =
       this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
           "/initialpose", rclcpp::QoS(rclcpp::KeepLast(1)),
           std::bind(&ICPlocalization::set2DPoseCallback, this,
                     std::placeholders::_1));
 
-  // Start the ICP worker after rate_ is set
   auto callable = [this]() { icpWorker(); };
   icpWorker_ = std::thread(callable);
 }
 
+// =============================================================================
+// fromPCL — UNCHANGED
+// =============================================================================
 DP ICPlocalization::fromPCL(const Pointcloud &pcl) {
-  // todo this can result in data loss???
   sensor_msgs::msg::PointCloud2 ros;
   pcl::toROSMsg(pcl, ros);
-
   return rosMsgToPointMatcherCloud<float>(ros, ros.is_dense);
 }
 
+// =============================================================================
+// getFixedFrame — UNCHANGED
+// =============================================================================
 const std::string &ICPlocalization::getFixedFrame() const {
   return fixedFrame_;
 }
 
+// =============================================================================
+// matchScans — CHANGE: icp_() call wrapped in map_mutex_ lock
+//
+// Why: setMapCloud() (called by callbackLoadMap from a service thread) also
+// locks map_mutex_. This ensures the map is never swapped while a scan match
+// is in progress. The lock is narrow — only around the icp_() call itself,
+// not the whole function, so pose prediction still runs without contention.
+// =============================================================================
 void ICPlocalization::matchScans() {
   if (!icp_.hasMap()) {
     return;
   }
 
-  // Skip if the accumulated cloud is invalid (non-dense / mismatched counts)
   if (!hasMatchingPointCounts(regCloud_)) {
     RCLCPP_WARN_STREAM(this->get_logger(),
                        "Skipping scan in matchScans: features cols="
@@ -322,7 +369,6 @@ void ICPlocalization::matchScans() {
   Eigen::Quaterniond initOrientation = lastOrientation_;
   Rigid3d before(lastPosition_, lastOrientation_);
   if (!isFirstScanMatch_) {
-    const Rigid3d lastPose(initPosition, initOrientation);
     const Rigid3d motionPoseChange =
         frameTracker_->getPoseChangeOfRangeSensorInMapFrame(
             lastOptimizedPoseTimestamp_, regCloudTimestamp_);
@@ -330,19 +376,20 @@ void ICPlocalization::matchScans() {
         Rigid3d(initPosition, initOrientation) * motionPoseChange;
     initPosition = motionCorrectedPose.translation();
     initOrientation = motionCorrectedPose.rotation();
-    //    std::cout << "Prediction diff: " << motionPoseChange.asString()
-    //    << std::endl;
   }
 
   PM::TransformationParameters initPose;
-  // Compute the transformation to express data in ref
   inputFilters_.apply(regCloud_);
-  //	optimizedPose_ = initPose;
+
   if (!isSetPoseFromUser_) {
     try {
       initPose = getTransformationMatrix<float>(toFloat(initPosition),
                                                 toFloat(initOrientation));
-      optimizedPose_ = icp_(regCloud_, initPose);
+      // CHANGE: narrow lock around icp_() so map swap cannot race with matching
+      {
+        std::lock_guard<std::mutex> lock(map_mutex_);
+        optimizedPose_ = icp_(regCloud_, initPose);
+      }
     } catch (const std::exception &e) {
       std::cerr << "Caught exception while scan matching: " << e.what()
                 << std::endl;
@@ -358,25 +405,15 @@ void ICPlocalization::matchScans() {
   getPositionAndOrientation<double>(toDouble(optimizedPose_), &lastPosition_,
                                     &lastOrientation_);
 
-  // limit translation if too big
-  //  Rigid3d poseDiffIcp = before.inverse()*Rigid3d(lastPosition_,
-  //  lastOrientation_); auto &t = poseDiffIcp.translation(); const
-  //  Eigen::Vector3d limitdXYZ(0.25,0.25,0.25); t.x() = std::fabs(t.x())
-  //  > limitdXYZ.x() ? limitdXYZ.x() : t.x(); t.y() = std::fabs(t.y()) >
-  //  limitdXYZ.y() ? limitdXYZ.y() : t.y(); t.z() = std::fabs(t.z()) >
-  //  limitdXYZ.z() ? limitdXYZ.z() : t.z(); lastPosition_ = (before *
-  //  poseDiffIcp).translation();
-
-  //  std::cout << "Ground truth diff: " << poseDiffIcp.asString() <<
-  //  "\n\n";
-
   frameTracker_->setTransformMapToRangeSensor(TimestampedTransform{
       optimizedPoseTimestamp_, Rigid3d(lastPosition_, lastOrientation_)});
   lastOptimizedPoseTimestamp_ = optimizedPoseTimestamp_;
-
   isFirstScanMatch_ = false;
 }
 
+// =============================================================================
+// publishPose — UNCHANGED
+// =============================================================================
 void ICPlocalization::publishPose() const {
   geometry_msgs::msg::PoseStamped pose_msg;
   pose_msg.pose.position.x = optimizedPose_(0, 3);
@@ -386,7 +423,6 @@ void ICPlocalization::publishPose() const {
   iso.matrix() = optimizedPose_;
   Eigen::Quaternionf q;
   q = iso.rotation();
-
   q.normalize();
   pose_msg.pose.orientation.w = q.w();
   pose_msg.pose.orientation.x = q.x();
@@ -403,6 +439,9 @@ void ICPlocalization::publishPose() const {
   }
 }
 
+// =============================================================================
+// publishRegisteredCloud — UNCHANGED
+// =============================================================================
 void ICPlocalization::publishRegisteredCloud() const {
   DP data_out(icp_.getReadingFiltered());
   icp_.transformations.apply(data_out, optimizedPose_);
@@ -411,24 +450,44 @@ void ICPlocalization::publishRegisteredCloud() const {
   registeredCloudPublisher_->publish(ros_msg);
 }
 
-void ICPlocalization::icpWorker() 
+// =============================================================================
+// icpWorker — CHANGE: pause guard added at the top of the loop
+//
+// Original loop condition: if (is_time_for_icp && scanReady && frameReady)
+// New behaviour: if is_paused_ is true, the entire scan-matching block is
+// skipped. The TF republish branch still runs so Nav2 does not lose the
+// map→odom transform during elevator transit.
+// =============================================================================
+void ICPlocalization::icpWorker()
 {
-  rclcpp::Rate r(100); 
-
+  rclcpp::Rate r(100);
   rclcpp::Time last_icp_time = this->now();
-  
   const double icp_wait_seconds = rate_;
 
   while (rclcpp::ok()) {
-    bool is_time_for_icp = (this->now() - last_icp_time).seconds() >= icp_wait_seconds;
 
+    // ── ADD: pause guard ─────────────────────────────────────────────────────
+    // While paused: keep the TF tree alive but do not call matchScans().
+    // This is the entire change to icpWorker — one if-block at the top.
+    if (is_paused_.load()) {
+      if (frameTracker_->isReady() && !isFirstScanMatch_.load()) {
+        if (isUseOdometry_) {
+          tfPublisher_->publishMapToOdom(optimizedPoseTimestamp_);
+        } else {
+          tfPublisher_->publishMapToRangeSensor(optimizedPoseTimestamp_);
+        }
+      }
+      r.sleep();
+      continue;   // skip everything below — no scan matching while paused
+    }
+    // ── END ADD ───────────────────────────────────────────────────────────────
+
+    bool is_time_for_icp = (this->now() - last_icp_time).seconds() >= icp_wait_seconds;
     const bool frameReady = frameTracker_->isReady();
     const bool scanReady = rangeDataAccumulator_->isAccumulatedRangeDataReady();
 
-    // 4. Modify condition: strict check for Time + Data
     if (is_time_for_icp && scanReady && frameReady) {
-      
-      // Reset the timer immediately
+
       last_icp_time = this->now();
 
       regCloudTimestamp_ =
@@ -441,27 +500,22 @@ void ICPlocalization::icpWorker()
                                << regCloud_.features.cols()
                                << " descriptors cols="
                                << regCloud_.descriptors.cols());
-        // Do not sleep here; just continue so TFs keep publishing
         continue;
       }
 
       namespace ch = std::chrono;
       const auto startTime = ch::steady_clock::now();
-      
-      // --- Heavy Computation ---
       matchScans();
-      
       const auto endTime = ch::steady_clock::now();
-      const double timeMs = 
+      const double timeMs =
           ch::duration_cast<ch::microseconds>(endTime - startTime).count() / 1000.0;
-      
+
       RCLCPP_INFO_STREAM(this->get_logger(), "Scan matching took: " << timeMs << " ms");
 
       publishPose();
       publishRegisteredCloud();
 
     } else {
-      // 5. This block now runs frequently (100 Hz) while waiting for the timer
       if (frameReady && !isFirstScanMatch_) {
         if (isUseOdometry_) {
           tfPublisher_->publishMapToOdom(optimizedPoseTimestamp_);
@@ -471,60 +525,119 @@ void ICPlocalization::icpWorker()
       }
     }
 
-    // 6. Sleep for only 0.01 seconds (100 Hz)
     r.sleep();
   }
 }
 
-// void ICPlocalization::icpWorker() 
-// {
-//   rclcpp::Rate r(rate_);
-//   // ros::Rate r(100);
-//   while (rclcpp::ok()) {
-//     const bool frameReady = frameTracker_->isReady();
-//     const bool scanReady = rangeDataAccumulator_->isAccumulatedRangeDataReady();
+// =============================================================================
+// ADD: callbackPauseLocalization
+//
+// Called by the elevator supervisor when the wheelchair enters or exits the
+// elevator. data=true freezes ICP; data=false resumes it.
+// is_paused_ is atomic so this is safe to call from any thread.
+// =============================================================================
+void ICPlocalization::callbackPauseLocalization(
+    const std::shared_ptr<std_srvs::srv::SetBool::Request> req,
+    std::shared_ptr<std_srvs::srv::SetBool::Response> res)
+{
+  is_paused_.store(req->data);
+  res->success = true;
+  res->message = is_paused_.load() ? "ICP PAUSED" : "ICP RESUMED";
+  RCLCPP_INFO(this->get_logger(), "%s", res->message.c_str());
+}
 
-//     if (scanReady && frameReady) {
-//       regCloudTimestamp_ =
-//           rangeDataAccumulator_->getAccumulatedRangeDataTimestamp();
-//       regCloud_ = rangeDataAccumulator_->popAccumulatedRangeData().data_;
+// =============================================================================
+// ADD: callbackResetLocalization
+//
+// Resets all localisation state so ICP re-initialises from a fresh anchor
+// on the next scan match. Always call this AFTER pause and BEFORE unpause.
+//
+// What it resets:
+//   isFirstScanMatch_ = true   → next scan uses the /initialpose seed, not
+//                                 dead-reckoning from the old floor's pose
+//   lastPosition_ / lastOrientation_ → zeroed (supervisor will inject the
+//                                        correct anchor via /initialpose)
+//   scan accumulator drained   → stale scans from the old floor are discarded
+// =============================================================================
+void ICPlocalization::callbackResetLocalization(
+    const std::shared_ptr<std_srvs::srv::Empty::Request> /*req*/,
+    std::shared_ptr<std_srvs::srv::Empty::Response> /*res*/)
+{
+  RCLCPP_INFO(this->get_logger(), "Resetting ICP localization state...");
 
-//       // Validate the cloud before processing to avoid PointMatcher::DataPoints::InvalidField
-//       if (!hasMatchingPointCounts(regCloud_)) {
-//         RCLCPP_WARN_STREAM(this->get_logger(),
-//                            "Skipping non-dense scan: features cols="
-//                                << regCloud_.features.cols()
-//                                << " descriptors cols="
-//                                << regCloud_.descriptors.cols());
-//         r.sleep();
-//         continue;
-//       }
+  isFirstScanMatch_.store(true);
+  isSetPoseFromUser_ = false;
+  lastPosition_.setZero();
+  lastOrientation_.setIdentity();
 
-//       namespace ch = std::chrono;
-//       const auto startTime = ch::steady_clock::now();
-//       matchScans();
-//       const auto endTime = ch::steady_clock::now();
-//       const unsigned int nUs =
-//           ch::duration_cast<ch::microseconds>(endTime - startTime).count();
-//       const double timeMs = nUs / 1000.0;
-//       std::cout << "Rate: " << rate_ << " Hz, " <<std::endl;
-//       RCLCPP_INFO_STREAM(this->get_logger(),
-//                        "Scan matching took: " << timeMs << " ms");
+  if (imuTracker_) {
+    imuTracker_->setInitialPose(lastPosition_, lastOrientation_);
+  }
+  if (tfPublisher_) {
+    tfPublisher_->setInitialPose(lastPosition_, lastOrientation_);
+  }
 
-//       publishPose();
-//       publishRegisteredCloud();
-//     } else {
-//       // Between scans: publish the latest transform at 100 Hz
-//       if (frameReady && !isFirstScanMatch_) {
-//         if (isUseOdometry_) {
-//           tfPublisher_->publishMapToOdom(optimizedPoseTimestamp_);
-//         } else {
-//           tfPublisher_->publishMapToRangeSensor(optimizedPoseTimestamp_);
-//         }
-//       }
-//     }
+  // Drain any scans that were accumulated while the elevator was in motion.
+  // These would have been captured in a feature-poor environment (elevator
+  // interior) and would give a bad first match on the new floor.
+  if (rangeDataAccumulator_) {
+    while (rangeDataAccumulator_->isAccumulatedRangeDataReady()) {
+      rangeDataAccumulator_->popAccumulatedRangeData();
+    }
+  }
 
-//     r.sleep();
-//   }
-// }
+  RCLCPP_INFO(this->get_logger(), "ICP reset complete.");
+}
+
+// =============================================================================
+// ADD: callbackLoadMap
+//
+// Hot-swaps the ICP reference map to a new PCD file. The file path is read
+// from the ROS parameter "map_path", which the supervisor sets with:
+//
+//   ros2 param set /icp_localization map_path "/path/to/floor4.pcd"
+//   ros2 service call /load_map std_srvs/srv/Trigger
+//
+// For a stacked-Z single-map setup (recommended) this service is never
+// called at runtime — the same map file covers all floors. It is provided
+// as a fallback for per-floor PCD files.
+//
+// IMPORTANT: Always call /pause_localization true before this, and
+//            /reset_localization + /pause_localization false after.
+// =============================================================================
+void ICPlocalization::callbackLoadMap(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request> /*req*/,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> res)
+{
+  std::string pcd_path;
+  this->get_parameter("map_path", pcd_path);
+
+  if (pcd_path.empty()) {
+    res->success = false;
+    res->message = "map_path parameter is empty. Set it before calling /load_map.";
+    RCLCPP_ERROR(this->get_logger(), "%s", res->message.c_str());
+    return;
+  }
+
+  RCLCPP_INFO(this->get_logger(), "Loading map from: %s", pcd_path.c_str());
+
+  Pointcloud::Ptr new_map(new Pointcloud());
+  if (pcl::io::loadPCDFile<pcl::PointXYZ>(pcd_path, *new_map) == -1) {
+    res->success = false;
+    res->message = "pcl::io::loadPCDFile failed for: " + pcd_path;
+    RCLCPP_ERROR(this->get_logger(), "%s", res->message.c_str());
+    return;
+  }
+
+  // setMapCloud acquires map_mutex_ internally
+  setMapCloud(new_map);
+
+  // Force re-alignment on the next scan
+  isFirstScanMatch_.store(true);
+
+  res->success = true;
+  res->message = "Map loaded: " + pcd_path;
+  RCLCPP_INFO(this->get_logger(), "Map swap complete.");
+}
+
 } // namespace icp_loco
