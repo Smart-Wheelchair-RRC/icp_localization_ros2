@@ -86,6 +86,8 @@ private:
   std::shared_ptr<ImuTracker> imuTracker_;
   std::shared_ptr<tf2_ros::TransformListener> tfListener_;
   std::shared_ptr<tf2_ros::Buffer> tfBuffer_;
+  // [DOCS] Modified from upstream — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
+  // Upstream: https://github.com/baiyeweiguang/icp_localization_ros2/blob/main/include/icp_localization_ros2/ICPlocalization.hpp#L88
   std::atomic<bool> isFirstScanMatch_{true};
   bool isUseOdometry_ = true;
   bool isSetPoseFromUser_ = false;

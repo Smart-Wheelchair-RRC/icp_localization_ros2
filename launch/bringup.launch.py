@@ -24,6 +24,8 @@ def generate_launch_description():
     icp_config_path = os.path.join(
         get_package_share_directory('icp_localization_ros2'), 'config', 'icp.yaml')
 
+    # [DOCS] Modified from upstream — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
+    # Upstream: https://github.com/baiyeweiguang/icp_localization_ros2/blob/main/launch/bringup.launch.py#L1
     # Launch argument for period (replaces rate)
     period_arg = DeclareLaunchArgument(
         'period',

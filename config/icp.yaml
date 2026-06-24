@@ -1,5 +1,6 @@
 #reference filters get applied to the map and to the icp
 referenceDataPointsFilters:
+  # [DOCS] Parameter changed from upstream default — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
   - MaxDistDataPointsFilter:
       maxDist: 30.0
   - RandomSamplingDataPointsFilter:
@@ -12,12 +13,14 @@ referenceDataPointsFilters:
   - ObservationDirectionDataPointsFilter
   - OrientNormalsDataPointsFilter 
 matcher:
+  # [DOCS] Parameter changed from upstream default — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
   KDTreeMatcher:
     knn: 1
     maxDist: 3.0
     epsilon: 3.16
 
 outlierFilters:
+  # [DOCS] Parameter changed from upstream default — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
   - TrimmedDistOutlierFilter:
      ratio: 0.65
   - SurfaceNormalOutlierFilter:
@@ -31,6 +34,7 @@ transformationCheckers:
       minDiffRotErr: 0.001
       minDiffTransErr: 0.01
       smoothLength: 2
+  # [DOCS] Parameter changed from upstream default — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
   - CounterTransformationChecker:
       maxIterationCount: 15
   - BoundTransformationChecker:

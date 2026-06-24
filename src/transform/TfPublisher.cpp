@@ -88,6 +88,8 @@ void TfPublisher::publishMapToOdom(const Time &t) {
   const auto mapToOdom = frameTracker_->getTransformMapToOdom(t);
   geometry_msgs::msg::TransformStamped transformStamped =
       toRos(mapToOdom, t, "map", "odom");
+  // [DOCS] Modified from upstream — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
+  // Upstream: https://github.com/baiyeweiguang/icp_localization_ros2/blob/main/src/transform/TfPublisher.cpp#L88
   transformStamped.header.stamp = nh_->now() + rclcpp::Duration::from_seconds(0.1);
   tfBroadcaster_->sendTransform(transformStamped);
   // just for debug

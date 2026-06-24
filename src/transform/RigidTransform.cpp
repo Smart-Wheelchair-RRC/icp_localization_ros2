@@ -33,6 +33,8 @@ TimestampedTransform interpolate(const TimestampedTransform& start,
     std::cout << "Start time: " << start.time_ << std::endl;
     std::cout << "End time: " << end.time_ << std::endl;
     std::cout << "Query time: " << time << std::endl;
+    // [DOCS] Modified from upstream — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
+    // Upstream: https://github.com/baiyeweiguang/icp_localization_ros2/blob/main/src/transform/RigidTransform.cpp#L36
     std::cerr << "transform interpolate:: query time is not between start and end time" << std::endl;
   }
 

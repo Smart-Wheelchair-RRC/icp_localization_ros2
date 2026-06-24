@@ -38,6 +38,8 @@ namespace icp_loco {
 namespace {
 const double kRadToDeg = 180.0 / M_PI;
 
+// [DOCS] Modified from upstream — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
+// Upstream: https://github.com/baiyeweiguang/icp_localization_ros2/blob/main/src/ICPlocalization.cpp#L39
 // Simple validity check for PointMatcher DataPoints: features and descriptors must
 // have the same number of columns (points). Non-dense or corrupted scans can violate this.
 inline bool hasMatchingPointCounts(const DP& cloud) {
@@ -257,6 +259,8 @@ void ICPlocalization::initialize() {
       this->declare_parameter("icp_localization_ros2.fixed_frame", "map");
   std::cout << "Setting fixed frame to: " << fixedFrame_ << std::endl;
 
+  // [DOCS] Modified from upstream — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
+  // Upstream: https://github.com/baiyeweiguang/icp_localization_ros2/blob/main/src/ICPlocalization.cpp#L243
   rate_ = this->declare_parameter("icp_localization_ros2.rate", 1.0);
   std::cout << "Setting rate to: " << rate_ << std::endl;
 
@@ -304,6 +308,8 @@ const std::string &ICPlocalization::getFixedFrame() const {
   return fixedFrame_;
 }
 
+// [DOCS] Modified from upstream — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
+// Upstream: https://github.com/baiyeweiguang/icp_localization_ros2/blob/main/src/ICPlocalization.cpp#L274
 void ICPlocalization::matchScans() {
   if (!icp_.hasMap()) {
     return;
@@ -411,9 +417,11 @@ void ICPlocalization::publishRegisteredCloud() const {
   registeredCloudPublisher_->publish(ros_msg);
 }
 
-void ICPlocalization::icpWorker() 
+// [DOCS] Modified from upstream — see docs/LOCALIZATION_NAV_DOCS.md#icp-changes-from-upstream
+// Upstream: https://github.com/baiyeweiguang/icp_localization_ros2/blob/main/src/ICPlocalization.cpp#L370
+void ICPlocalization::icpWorker()
 {
-  rclcpp::Rate r(100); 
+  rclcpp::Rate r(100);
 
   rclcpp::Time last_icp_time = this->now();
   
