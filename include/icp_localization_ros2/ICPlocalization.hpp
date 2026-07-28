@@ -1,8 +1,8 @@
 /*
  * ICPlocalization.hpp
  *
- *  Created on: Apr 23, 2021
- *      Author: jelavice
+ * Created on: Apr 23, 2021
+ * Author: jelavice
  */
 
 #pragma once
@@ -29,7 +29,7 @@
 #include <tf2_ros/transform_listener.h>
 #include <std_srvs/srv/set_bool.hpp>
 #include <std_srvs/srv/empty.hpp>
-#include <example_interfaces/srv/set_string.hpp>
+#include <std_srvs/srv/trigger.hpp> // ◄ SWAPPED: Safe system header replacement
 #include <thread>
 
 namespace icp_loco {
@@ -65,8 +65,9 @@ private:
   void callbackResetLocalization(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
                                  std::shared_ptr<std_srvs::srv::Empty::Response> res);
 
-  void callbackLoadMap(const std::shared_ptr<example_interfaces::srv::SetString::Request> req,
-                       std::shared_ptr<example_interfaces::srv::SetString::Response> res);
+  // ◄ SWAPPED SIGNATURE TO TRIGGER
+  void callbackLoadMap(const std::shared_ptr<std_srvs::srv::Trigger::Request> req,
+                       std::shared_ptr<std_srvs::srv::Trigger::Response> res);
 
   Eigen::Vector3d userSetPosition_;
   Eigen::Quaterniond userSetQuaternion_;
@@ -109,7 +110,7 @@ private:
   std::atomic<bool> is_paused_{false};
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr pause_localization_srv_;
   rclcpp::Service<std_srvs::srv::Empty>::SharedPtr reset_localization_srv_;
-  rclcpp::Service<example_interfaces::srv::SetString>::SharedPtr load_map_srv_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr load_map_srv_;
 };
 
 } // namespace icp_loco

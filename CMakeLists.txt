@@ -9,26 +9,27 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_options(-O3)
+
 # find dependencies
 find_package(ament_cmake_auto REQUIRED)
 
+# Let ament discover standard ROS2 components safely from package.xml
 ament_auto_find_build_dependencies()
+
+# Create target executable wrapper from src files
 ament_auto_add_executable(icp_localization 
   DIRECTORY src)
 
-
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
+# ◄ THE TRUE PLAIN SIGNATURE FIX:
+# Removed the 'PRIVATE' keyword completely. Now it is a pure plain signature call
+# which perfectly matches ament_target_dependencies' underlying behavior.
+if(TARGET icp_localization)
+  target_link_libraries(icp_localization gpu_bbs3d)
+endif()
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
