@@ -27,7 +27,8 @@ bool RangeDataAccumulator::isAccumulatedTargetNumRangeData() const {
   return currentNumRangeDataAccumulated_ == param_.numAccumulatedRangeData_;
 }
 
-const Time &RangeDataAccumulator::getAccumulatedRangeDataTimestamp() const {
+Time RangeDataAccumulator::getAccumulatedRangeDataTimestamp() const {
+  std::lock_guard<std::mutex> lck(accumulatedDataMutex_);
   return accumulatedRangeData_.timestamp_;
 }
 
@@ -35,7 +36,7 @@ bool RangeDataAccumulator::isAccumulatedRangeDataReady() const {
   return isRangeDataReady_;
 }
 
-const TimedRangeData &RangeDataAccumulator::popAccumulatedRangeData() const {
+TimedRangeData RangeDataAccumulator::popAccumulatedRangeData() const {
   std::lock_guard<std::mutex> lck(accumulatedDataMutex_);
   isRangeDataReady_ = false;
   return accumulatedRangeData_;
@@ -73,7 +74,8 @@ void RangeDataAccumulator::addRangeData(const DP &rangeData, const Time &t) {
   }
 }
 
-const TimedRangeData &RangeDataAccumulator::getAccumulatedRangeData() const {
+TimedRangeData RangeDataAccumulator::getAccumulatedRangeData() const {
+  std::lock_guard<std::mutex> lck(accumulatedDataMutex_);
   return accumulatedRangeData_;
 }
 
