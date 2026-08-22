@@ -27,7 +27,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_srvs/srv/set_bool.hpp>
 #include <std_srvs/srv/empty.hpp>
-#include <std_srvs/srv/trigger.hpp> // ◄ SWAPPED INCLUDE HERE
+#include <std_srvs/srv/trigger.hpp>
 #include <thread>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <filesystem>
@@ -66,14 +66,36 @@ ICPlocalization::~ICPlocalization() {
 }
 
 void ICPlocalization::setMapCloud(const Pointcloud::Ptr map) {
+  if (!map || map->points.empty()) {
+    RCLCPP_ERROR(this->get_logger(), "Passed map is empty, cannot set or publish!");
+    return;
+  }
+
+  // 1. Clear old points to prevent accumulation
+  mapCloud_.points.clear();
+  mapCloud_.width = 0;
+  mapCloud_.height = 0;
+
+  // 2. Downsample for ICP reference
   mapCloudFilter_.setInputCloud(map);
   mapCloudFilter_.filter(mapCloud_);
   refCloud_ = fromPCL(mapCloud_);
 
   isMapSet_ = true;
   icp_.setMap(refCloud_);
-  std::cout << "Map size is: " << map->points.size() << "(befor filter), "
-            << mapCloud_.points.size() << "(after filter)" << std::endl;
+
+  RCLCPP_INFO(this->get_logger(), "✅ Map loaded: %zu -> %zu points",
+              map->points.size(), mapCloud_.points.size());
+
+  // 3. Publish ONCE. DDS handles delivery to any present or future RViz instance.
+  if (mapPublisher_) {
+    sensor_msgs::msg::PointCloud2 ros_msg;
+    pcl::toROSMsg(mapCloud_, ros_msg);
+    ros_msg.header.frame_id = fixedFrame_;
+    ros_msg.header.stamp = this->now();
+    mapPublisher_->publish(ros_msg);
+    RCLCPP_INFO(this->get_logger(), "📢 Latched new floor PCD to /icp_map (%s frame)", fixedFrame_.c_str());
+  }
 }
 
 void ICPlocalization::setInitialPose(const Eigen::Vector3d &p,
@@ -125,6 +147,13 @@ void ICPlocalization::initializeInternal() {
   posePub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
       "range_sensor_pose", rclcpp::QoS(rclcpp::KeepLast(1)));
 
+  // Latched publisher for global PCD map visualization
+  rclcpp::QoS map_qos(rclcpp::KeepLast(1));
+  map_qos.reliable();
+  map_qos.transient_local();
+  mapPublisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+      "icp_map", map_qos);
+
   icp_.setDefault();
 
   tfBuffer_.reset(new tf2_ros::Buffer(this->get_clock()));
@@ -139,13 +168,23 @@ void ICPlocalization::initializeInternal() {
       "reset_localization",
       std::bind(&ICPlocalization::callbackResetLocalization, this, std::placeholders::_1, std::placeholders::_2));
 
-  // ◄ INITIALIZATION RE-ASSIGNED TO TRIGGER COGNIZANCE
   this->load_map_srv_ = this->create_service<std_srvs::srv::Trigger>(
       "load_map",
       std::bind(&ICPlocalization::callbackLoadMap, this, std::placeholders::_1, std::placeholders::_2));
 }
 
 void ICPlocalization::initialize() {
+
+  // ✅ Safe declaration: Only declare if not already declared
+  if (!this->has_parameter("config")) {
+    this->declare_parameter("config", "");
+  }
+  if (!this->has_parameter("pcd_path")) {
+    this->declare_parameter("pcd_path", "");
+  }
+  if (!this->has_parameter("pcd_file_path")) {
+    this->declare_parameter("pcd_file_path", "");
+  }
 
   const std::string configFileIcp =
       this->declare_parameter("icp_config_path", "");
@@ -480,26 +519,30 @@ void ICPlocalization::callbackResetLocalization(const std::shared_ptr<std_srvs::
   }
 }
 
-// ◄ DYNAMIC TRIGGER ADAPTATION COMPLETED: Reads file path directly from the node parameter tree
 void ICPlocalization::callbackLoadMap(const std::shared_ptr<std_srvs::srv::Trigger::Request> req,
                                       std::shared_ptr<std_srvs::srv::Trigger::Response> res) {
   (void)req;
-  std::string pcd_path;
+  std::string pcd_path = "";
   
-  if (!this->get_parameter("config", pcd_path)) {
-    this->get_parameter_or("pcd_path", pcd_path, std::string(""));
+  if (this->has_parameter("pcd_path")) {
+    this->get_parameter("pcd_path", pcd_path);
+  }
+  if (pcd_path.empty() && this->has_parameter("config")) {
+    this->get_parameter("config", pcd_path);
+  }
+  if (pcd_path.empty() && this->has_parameter("pcd_file_path")) {
+    this->get_parameter("pcd_file_path", pcd_path);
   }
 
   if (pcd_path.empty()) {
     RCLCPP_ERROR(this->get_logger(), "Load map triggered, but active file path configuration parameter string is empty!");
     res->success = false;
-    res->message = "Active path parameters are empty. Set 'config' parameter first.";
+    res->message = "Active path parameters are empty. Set 'pcd_path' or 'config' first.";
     return;
   }
 
-  RCLCPP_INFO(this->get_logger(), "Loading new floor PCD map from: %s", pcd_path.c_str());
+  RCLCPP_INFO(this->get_logger(), "📥 Loading new floor PCD map from: %s", pcd_path.c_str());
   
-  // ◄ FIXED: Swapped undefined PointType for pcl::PointXYZ
   pcl::PointCloud<pcl::PointXYZ>::Ptr new_map(new pcl::PointCloud<pcl::PointXYZ>);
 
   if (pcl::io::loadPCDFile<pcl::PointXYZ>(pcd_path, *new_map) == -1) {

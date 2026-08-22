@@ -79,6 +79,7 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
       registeredCloudPublisher_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr posePub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr mapPublisher_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
       initialPose_;
   pcl::VoxelGrid<pcl::PointXYZ> mapCloudFilter_;
