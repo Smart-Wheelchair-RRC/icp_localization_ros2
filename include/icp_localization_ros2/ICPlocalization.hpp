@@ -1,8 +1,8 @@
 /*
  * ICPlocalization.hpp
  *
- *  Created on: Apr 23, 2021
- *      Author: jelavice
+ * Created on: Apr 23, 2021
+ * Author: jelavice
  */
 
 #pragma once
@@ -27,6 +27,9 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
+#include <std_srvs/srv/set_bool.hpp>
+#include <std_srvs/srv/empty.hpp>
+#include <std_srvs/srv/trigger.hpp> // ◄ SWAPPED: Safe system header replacement
 #include <thread>
 
 namespace icp_loco {
@@ -56,6 +59,16 @@ public:
   void initializeInternal();
 
 private:
+  void callbackPauseLocalization(const std::shared_ptr<std_srvs::srv::SetBool::Request> req,
+                                 std::shared_ptr<std_srvs::srv::SetBool::Response> res);
+
+  void callbackResetLocalization(const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+                                 std::shared_ptr<std_srvs::srv::Empty::Response> res);
+
+  // ◄ SWAPPED SIGNATURE TO TRIGGER
+  void callbackLoadMap(const std::shared_ptr<std_srvs::srv::Trigger::Request> req,
+                       std::shared_ptr<std_srvs::srv::Trigger::Response> res);
+
   Eigen::Vector3d userSetPosition_;
   Eigen::Quaterniond userSetQuaternion_;
   Eigen::Vector3d lastPosition_;
@@ -66,6 +79,7 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
       registeredCloudPublisher_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr posePub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr mapPublisher_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
       initialPose_;
   pcl::VoxelGrid<pcl::PointXYZ> mapCloudFilter_;
@@ -93,6 +107,11 @@ private:
 
   double rate_ = 10.0;
   rclcpp::TimerBase::SharedPtr tfRepublishTimer_;
+
+  std::atomic<bool> is_paused_{false};
+  rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr pause_localization_srv_;
+  rclcpp::Service<std_srvs::srv::Empty>::SharedPtr reset_localization_srv_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr load_map_srv_;
 };
 
 } // namespace icp_loco
